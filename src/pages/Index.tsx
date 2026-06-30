@@ -1,8 +1,18 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Icon from '@/components/ui/icon';
 import SpectrumDisplay from '@/components/SpectrumDisplay';
 import { Slider } from '@/components/ui/slider';
 import { Button } from '@/components/ui/button';
+
+const SPECTRUM_URL = 'https://functions.poehali.dev/671479c7-4803-4616-9201-be694bdd7c2e';
+
+interface SpectrumData {
+  start_freq: number;
+  span: number;
+  unit: string;
+  levels: number[];
+  source: string;
+}
 
 const navItems = [
   { id: 'measure', label: 'Измерения', icon: 'Activity' },
@@ -17,9 +27,49 @@ const Index = () => {
   const [active, setActive] = useState('measure');
   const [zoom, setZoom] = useState([2]);
   const [running, setRunning] = useState(true);
+  const [data, setData] = useState<SpectrumData | null>(null);
+  const [connected, setConnected] = useState(false);
+  const runningRef = useRef(running);
+  runningRef.current = running;
 
-  const startFreq = 900;
-  const span = 2100 / zoom[0];
+  useEffect(() => {
+    let stop = false;
+    const poll = async () => {
+      if (!stop && runningRef.current) {
+        try {
+          const res = await fetch(SPECTRUM_URL);
+          const json = await res.json();
+          setData(json);
+          setConnected(true);
+        } catch {
+          setConnected(false);
+        }
+      }
+    };
+    poll();
+    const id = setInterval(poll, 1000);
+    return () => {
+      stop = true;
+      clearInterval(id);
+    };
+  }, []);
+
+  const baseStart = data?.start_freq ?? 900;
+  const baseSpan = data?.span ?? 2100;
+  const span = baseSpan / zoom[0];
+  const startFreq = baseStart + (baseSpan - span) / 2;
+
+  const levels = data?.levels ?? [];
+  const visible = (() => {
+    if (!levels.length) return [];
+    const from = Math.floor(((startFreq - baseStart) / baseSpan) * levels.length);
+    const count = Math.max(2, Math.round(levels.length / zoom[0]));
+    return levels.slice(Math.max(0, from), Math.max(2, from + count));
+  })();
+
+  const peak = levels.length ? Math.max(...levels) : 0;
+  const floor = levels.length ? Math.min(...levels) : 0;
+  const isDevice = data?.source === 'device';
 
   return (
     <div className="min-h-screen grid-bg text-foreground flex flex-col lg:flex-row">
@@ -60,9 +110,11 @@ const Index = () => {
 
         <div className="mt-auto p-4 hidden lg:block border-t border-sidebar-border">
           <div className="flex items-center gap-2 font-mono text-xs">
-            <span className="h-2 w-2 rounded-full bg-primary animate-flicker" />
-            <span className="text-muted-foreground">УСТРОЙСТВО</span>
-            <span className="text-primary ml-auto">ONLINE</span>
+            <span className={`h-2 w-2 rounded-full ${connected ? 'bg-primary animate-flicker' : 'bg-destructive'}`} />
+            <span className="text-muted-foreground">{isDevice ? 'USB' : 'СИМ'}</span>
+            <span className={`ml-auto ${connected ? 'text-primary' : 'text-destructive'}`}>
+              {connected ? 'ONLINE' : 'OFFLINE'}
+            </span>
           </div>
         </div>
       </aside>
@@ -76,7 +128,7 @@ const Index = () => {
               Анализатор спектра
             </h1>
             <p className="font-mono text-xs text-muted-foreground mt-1">
-              SWEEP MODE · CONTINUOUS · DET: PEAK
+              SWEEP MODE · CONTINUOUS · DET: PEAK · {isDevice ? 'USB DEVICE' : 'SIMULATION'}
             </p>
           </div>
           <div className="flex gap-2">
@@ -103,8 +155,8 @@ const Index = () => {
           {[
             { label: 'CENTER', value: `${(startFreq + span / 2).toFixed(0)}`, unit: 'MHz' },
             { label: 'SPAN', value: span.toFixed(0), unit: 'MHz' },
-            { label: 'PEAK', value: '-18.4', unit: 'dBm' },
-            { label: 'NOISE FLOOR', value: '-92.7', unit: 'dBm' },
+            { label: 'PEAK', value: peak.toFixed(1), unit: 'dBm' },
+            { label: 'NOISE FLOOR', value: floor.toFixed(1), unit: 'dBm' },
           ].map((s) => (
             <div key={s.label} className="bg-card px-4 py-3">
               <div className="font-mono text-[10px] text-muted-foreground tracking-widest">{s.label}</div>
@@ -118,7 +170,14 @@ const Index = () => {
 
         {/* Spectrum */}
         <div className="animate-fade-in">
-          <SpectrumDisplay zoom={zoom[0]} startFreq={startFreq} span={span} />
+          <SpectrumDisplay
+            zoom={zoom[0]}
+            startFreq={startFreq}
+            span={span}
+            levels={visible}
+            live={running && connected}
+            source={data?.source ?? 'simulation'}
+          />
         </div>
 
         {/* Controls */}
@@ -133,10 +192,10 @@ const Index = () => {
             </div>
             <Slider value={zoom} onValueChange={setZoom} min={1} max={10} step={0.5} />
             <div className="flex justify-between mt-2 font-mono text-[10px] text-muted-foreground">
-              <span>900 MHz</span>
+              <span>{baseStart.toFixed(0)} MHz</span>
               <span>WIDE</span>
               <span>NARROW</span>
-              <span>3000 MHz</span>
+              <span>{(baseStart + baseSpan).toFixed(0)} MHz</span>
             </div>
           </div>
 
@@ -147,10 +206,10 @@ const Index = () => {
             </span>
             <div className="space-y-2 font-mono text-xs">
               {[
-                ['Температура', '37.2 °C', 'text-primary'],
-                ['Аттенюатор', '10 dB', 'text-foreground'],
-                ['Опорный ур.', '0 dBm', 'text-foreground'],
-                ['Калибровка', 'OK', 'text-primary'],
+                ['Источник', isDevice ? 'USB прибор' : 'Симуляция', 'text-primary'],
+                ['Связь', connected ? 'Активна' : 'Нет', connected ? 'text-primary' : 'text-destructive'],
+                ['Точек', String(levels.length), 'text-foreground'],
+                ['Опрос', '1 сек', 'text-foreground'],
               ].map(([k, v, c]) => (
                 <div key={k} className="flex justify-between border-b border-border/50 pb-1.5">
                   <span className="text-muted-foreground">{k}</span>

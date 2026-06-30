@@ -1,0 +1,21 @@
+{
+  "tests": [
+    {
+      "name": "Получение последнего замера спектра",
+      "method": "GET",
+      "path": "/",
+      "expectedStatus": 200,
+      "expectedBody": { "unit": "string", "levels": "array" },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Приём данных от прибора",
+      "method": "POST",
+      "path": "/",
+      "body": { "start_freq": 900, "span": 2100, "unit": "dBm", "device": "SPECTRA-X", "levels": [-90, -45, -20, -60] },
+      "expectedStatus": 200,
+      "expectedBody": { "ok": true },
+      "bodyMatcher": "partial"
+    }
+  ]
+}
